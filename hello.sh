@@ -1,1 +1,1 @@
-echo"Hello from my first bash project"
+echo "Hello again, Bash project"
