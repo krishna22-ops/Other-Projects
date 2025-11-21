@@ -1,1 +1,125 @@
+# Main
+import pandas as pd
+import re
+from bs4 import BeautifulSoup
+from sklearn.feature_extraction.text import CountVectorizer
+from sklearn.svm import SVC
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report
+import numpy as np
+import warnings
+warnings.filterwarnings("ignore")
 
+# -------------------------------
+# LOAD & CLEAN DATA
+# -------------------------------
+df = pd.read_csv('Datasets/sorted_datasets.csv')
+
+def clean_text(text):
+    """Remove HTML, URLs, punctuation, and lowercase text."""
+    if not isinstance(text, str):
+        return ""
+    text = BeautifulSoup(text, "lxml").get_text()
+    text = re.sub(r"http\S+|www\S+", "", text)
+    text = re.sub(r"[^a-zA-Z0-9\s]", "", text)
+    return text.lower().strip()
+
+df['text_clean'] = df['Text'].apply(clean_text)
+df['sentiment'] = df['Score'].apply(lambda x: -1 if x <= 2 else (0 if x == 3 else 1))
+df = df[df['text_clean'].str.len() > 0].reset_index(drop=True)
+
+# -------------------------------
+# TRAIN TEST SPLIT & MODEL TRAINING
+# -------------------------------
+X_train, X_test, y_train, y_test = train_test_split(
+    df['text_clean'], df['sentiment'], test_size=0.2, random_state=42, stratify=df['sentiment']
+)
+
+vectorizer = CountVectorizer(stop_words='english', max_features=5000)
+X_train_vec = vectorizer.fit_transform(X_train)
+X_test_vec = vectorizer.transform(X_test)
+
+svm = SVC(probability=True, kernel='linear', class_weight='balanced', random_state=42)
+svm.fit(X_train_vec, y_train)
+
+print("\nModel evaluation on test data:")
+print(classification_report(y_test, svm.predict(X_test_vec), target_names=["Negative", "Neutral", "Positive"]))
+
+# -------------------------------
+# KEYWORD SENTIMENT FUNCTION
+# -------------------------------
+def keyword_sentiment(text):
+    """Simple word-based rule sentiment."""
+    if not isinstance(text, str) or not text.strip():
+        return "Neutral"
+    text = text.lower()
+    positive_words = {'good', 'great', 'excellent', 'awesome', 'amazing', 'love', 'perfect', 'best', 'fantastic'}
+    negative_words = {'bad', 'terrible', 'awful', 'horrible', 'hate', 'worst', 'disappointing', 'poor'}
+    has_pos = any(word in text for word in positive_words)
+    has_neg = any(word in text for word in negative_words)
+    if has_pos and not has_neg:
+        return "Positive"
+    elif has_neg and not has_pos:
+        return "Negative"
+    elif has_pos and has_neg:
+        return "Neutral"
+    return "Neutral"
+
+# -------------------------------
+# INTERACTIVE SEARCH
+# -------------------------------
+def predict_by_keyword(keyword):
+    filtered = df[df['text_clean'].str.contains(keyword.lower(), na=False)]
+    if filtered.empty:
+        print(f"No comments found containing '{keyword}'.")
+        return
+    sentiment_map = {-1: "Negative", 0: "Neutral", 1: "Positive"}
+    print(f"\nFound {len(filtered)} comments containing '{keyword}'. Showing up to 5 examples:\n")
+    sample = filtered.sample(min(5, len(filtered)), random_state=42)
+    for i, row in enumerate(sample['text_clean'], start=1):
+        svm_pred = sentiment_map[svm.predict(vectorizer.transform([row]))[0]]
+        kw_pred = keyword_sentiment(row)
+        print(f"Comment {i}: {row}")
+        print(f"SVM Sentiment: {svm_pred}")
+        print(f"Keyword Rule:  {kw_pred}")
+        print("-" * 50)
+
+# -------------------------------
+# RUN INTERACTIVE PROMPT
+# -------------------------------
+if __name__ == "__main__":
+    print("\n--- INTERACTIVE SENTIMENT SEARCH ---")
+    keyword = input("Enter a keyword to search for in comments: ").strip()
+    predict_by_keyword(keyword)
+
+#Confusion Matrix
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.metrics import confusion_matrix
+import os
+
+#Trained model and data from main.py
+from Main import svm, vectorizer, X_test, y_test
+
+# Create results folder
+os.makedirs('results', exist_ok=True)
+
+# -------------------------------
+# CONFUSION MATRIX ONLY
+# -------------------------------
+y_pred = svm.predict(X_test)
+
+# Create confusion matrix plot
+plt.figure(figsize=(8, 6))
+cm = confusion_matrix(y_test, y_pred)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', 
+            xticklabels=['Negative', 'Neutral', 'Positive'],
+            yticklabels=['Negative', 'Neutral', 'Positive'])
+plt.title('Confusion Matrix - SVM Sentiment Analysis')
+plt.xlabel('Predicted Label')
+plt.ylabel('True Label')
+plt.tight_layout()
+plt.savefig('results/confusion_matrix.png', dpi=300, bbox_inches='tight')
+plt.show()
+
+print("Confusion matrix saved to results/confusion_matrix.png")
