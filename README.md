@@ -1,1 +1,1 @@
-This is my first ever git project which I made from git bash which prints a greeting message.
+This repository consists of my other projects which I made for my university.
